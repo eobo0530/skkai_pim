@@ -1,0 +1,19 @@
+# Build artifacts
+attacc_simulator/ramulator2/build/
+attacc_simulator/ramulator2/ramulator2
+attacc_simulator/ramulator2/libramulator.so
+
+# Trace files (generated)
+*.trace
+*.yaml.bak
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Analysis output
+chunkkv_analysis.csv
+
+# OS
+.DS_Store
