@@ -1,0 +1,2 @@
+L,nhead,dhead,dbyte,pim_type,power_constraint,cycle,mac,softmax,mvgb,mvsb,wrgb
+513,1,128,2,BA,True,6226,178,1,952,96,664
