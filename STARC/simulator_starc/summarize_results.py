@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Task 1 실측 결과 수집 (1K ~ 32K) 요약 CSV 저장 스크립트.
+Task 1 결과 수집 + 64K/128K 외삽 → 요약 CSV 저장.
 """
 import csv
 import os
@@ -31,10 +31,8 @@ def main():
     results = []
     
     print("=" * 110)
-    print("  STARC Remapping Wall — 실측 벤치마크 결과 (1K ~ 32K)")
+    print("  STARC Remapping Wall — 결과 수집 (실측 및 외삽)")
     print("=" * 110)
-    print(f"{'L':>8} | {'KV Budget':>10} | {'T_dense':>8} | {'T_comp':>8} | {'T_cluster':>10} | {'T_copy':>8} | {'T_STARC':>8} | {'Speedup':>8} | {'Overhead':>8}")
-    print("-" * 110)
     
     for L in MEASURED_LENGTHS:
         t_d = parse_csv(os.path.join(RESULTS_DIR, f"dense_L{L}.csv"))
@@ -47,14 +45,14 @@ def main():
             continue
         
         kv_budget = compute_kv_budget(L)
-        t_clustering = t_c - t_s      # 클러스터링 연산만
-        t_copy = t_f - t_c            # 물리적 데이터 이동만
-        t_comp = t_s                  # sparse GEMV 연산
-        t_starc = t_f                 # 총 STARC 레이턴시
+        t_clustering = t_c - t_s
+        t_copy = t_f - t_c
+        t_comp = t_s
+        t_starc = t_f
         speedup = t_d / t_starc if t_starc > 0 else float('inf')
         overhead_pct = (t_clustering + t_copy) / t_comp * 100 if t_comp > 0 else 0
         
-        row = {
+        results.append({
             "context_length": L,
             "kv_budget": kv_budget,
             "T_dense": t_d,
@@ -63,22 +61,50 @@ def main():
             "T_copy": t_copy,
             "T_starc_total": t_starc,
             "speedup": speedup,
-            "overhead_pct": overhead_pct
-        }
-        results.append(row)
+            "overhead_pct": overhead_pct,
+            "source": "measured"
+        })
         
-        marker = " ← INVERSION" if speedup < 1.0 else ""
+    # Extrapolation for 64K and 128K based on 32K data
+    r32 = next((r for r in results if r["context_length"] == 32768), None)
+    if r32:
+        for scale, L in [(2, 65536), (4, 131072)]:
+            kv_budget = compute_kv_budget(L)
+            t_d = r32["T_dense"] * scale
+            t_comp = r32["T_computation"] * (kv_budget / r32["kv_budget"])
+            t_clustering = r32["T_clustering"] * (scale * scale)
+            t_copy = r32["T_copy"] * scale
+            t_starc = t_comp + t_clustering + t_copy
+            speedup = t_d / t_starc if t_starc > 0 else float('inf')
+            overhead_pct = (t_clustering + t_copy) / t_comp * 100 if t_comp > 0 else 0
+            
+            results.append({
+                "context_length": L,
+                "kv_budget": kv_budget,
+                "T_dense": t_d,
+                "T_computation": t_comp,
+                "T_clustering": t_clustering,
+                "T_copy": t_copy,
+                "T_starc_total": t_starc,
+                "speedup": speedup,
+                "overhead_pct": overhead_pct,
+                "source": "extrapolated"
+            })
+            
+    print(f"{'L':>8} | {'KV Budget':>10} | {'T_dense':>8} | {'T_comp':>8} | {'T_cluster':>10} | {'T_copy':>8} | {'T_STARC':>8} | {'Speedup':>8} | {'Overhead':>8} | {'Source':>12}")
+    print("-" * 110)
+    for r in results:
+        marker = " ← INVERSION" if r["speedup"] < 1.0 else ""
         print(
-            f"{L:>8} | {kv_budget:>10} | "
-            f"{t_d:>7.3f}ms | {t_comp:>7.3f}ms | "
-            f"{t_clustering:>9.3f}ms | {t_copy:>7.3f}ms | "
-            f"{t_starc:>7.3f}ms | {speedup:>7.3f}x | "
-            f"{overhead_pct:>6.1f}%{marker}"
+            f"{r['context_length']:>8} | {r['kv_budget']:>10} | "
+            f"{r['T_dense']:>7.3f}ms | {r['T_computation']:>7.3f}ms | "
+            f"{r['T_clustering']:>9.3f}ms | {r['T_copy']:>7.3f}ms | "
+            f"{r['T_starc_total']:>7.3f}ms | {r['speedup']:>7.3f}x | "
+            f"{r['overhead_pct']:>6.1f}% | {r['source']:>12}{marker}"
         )
     print("=" * 110)
     
-    # CSV 저장
-    summary_file = os.path.join(RESULTS_DIR, "task1_summary_32k.csv")
+    summary_file = os.path.join(RESULTS_DIR, "task1_summary.csv")
     if results:
         fieldnames = list(results[0].keys())
         with open(summary_file, "w", newline="") as f:
